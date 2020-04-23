@@ -9,7 +9,9 @@ import 'package:rxdart/rxdart.dart';
 
 class PlacesAutocompleteWidget extends StatefulWidget {
   final String apiKey;
+  final String startText;
   final String hint;
+  final BorderRadius overlayBorderRadius;
   final Location location;
   final num offset;
   final num radius;
@@ -22,6 +24,7 @@ class PlacesAutocompleteWidget extends StatefulWidget {
   final Mode mode;
   final Widget logo;
   final ValueChanged<PlacesAutocompleteResponse> onError;
+  final int debounce;
 
   /// optional - sets 'proxy' value in google_maps_webservice
   ///
@@ -40,6 +43,7 @@ class PlacesAutocompleteWidget extends StatefulWidget {
       {@required this.apiKey,
       this.mode = Mode.fullscreen,
       this.hint = "Search",
+      this.overlayBorderRadius,
       this.offset,
       this.location,
       this.radius,
@@ -53,7 +57,9 @@ class PlacesAutocompleteWidget extends StatefulWidget {
       this.onError,
       Key key,
       this.proxyBaseUrl,
-      this.httpClient})
+      this.httpClient,
+      this.startText,
+      this.debounce = 300})
       : super(key: key);
 
   @override
@@ -85,11 +91,19 @@ class _PlacesAutocompleteOverlayState extends PlacesAutocompleteState {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final headerTopLeftBorderRadius = widget.overlayBorderRadius != null ? 
+      widget.overlayBorderRadius.topLeft : Radius.circular(2);
+
+    final headerTopRightBorderRadius = widget.overlayBorderRadius != null ? 
+      widget.overlayBorderRadius.topRight : Radius.circular(2);
+
     final header = Column(children: <Widget>[
       Material(
           color: theme.dialogBackgroundColor,
           borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(2.0), topRight: Radius.circular(2.0)),
+            topLeft: headerTopLeftBorderRadius,
+            topRight: headerTopRightBorderRadius
+          ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
@@ -114,7 +128,13 @@ class _PlacesAutocompleteOverlayState extends PlacesAutocompleteState {
           )
     ]);
 
-    var body;
+    Widget body;
+
+    final bodyBottomLeftBorderRadius = widget.overlayBorderRadius != null ? 
+      widget.overlayBorderRadius.bottomLeft : Radius.circular(2);
+
+    final bodyBottomRightBorderRadius = widget.overlayBorderRadius != null ? 
+      widget.overlayBorderRadius.bottomRight : Radius.circular(2);
 
     if (_searching) {
       body = Stack(
@@ -128,15 +148,16 @@ class _PlacesAutocompleteOverlayState extends PlacesAutocompleteState {
         color: theme.dialogBackgroundColor,
         child: widget.logo ?? PoweredByGoogleImage(),
         borderRadius: BorderRadius.only(
-            bottomLeft: Radius.circular(2.0),
-            bottomRight: Radius.circular(2.0)),
+          bottomLeft: bodyBottomLeftBorderRadius,
+          bottomRight: bodyBottomRightBorderRadius,
+        ),
       );
     } else {
       body = SingleChildScrollView(
         child: Material(
           borderRadius: BorderRadius.only(
-            bottomLeft: Radius.circular(2.0),
-            bottomRight: Radius.circular(2.0),
+            bottomLeft: bodyBottomLeftBorderRadius,
+            bottomRight: bodyBottomRightBorderRadius,
           ),
           color: theme.dialogBackgroundColor,
           child: ListBody(
@@ -166,7 +187,7 @@ class _PlacesAutocompleteOverlayState extends PlacesAutocompleteState {
     return container;
   }
 
-  Icon get _iconBack => -Theme.of(context).platform == TargetPlatform.iOS
+  Icon get _iconBack => Theme.of(context).platform == TargetPlatform.iOS
       ? Icon(Icons.arrow_back_ios): Icon(Icons.arrow_back);
 
 
@@ -341,13 +362,14 @@ abstract class PlacesAutocompleteState extends State<PlacesAutocompleteWidget> {
   PlacesAutocompleteResponse _response;
   GoogleMapsPlaces _places;
   bool _searching;
+  Timer _debounce;
 
   final _queryBehavior = BehaviorSubject<String>.seeded('');
 
   @override
   void initState() {
     super.initState();
-    _queryTextController = TextEditingController(text: "");
+    _queryTextController = TextEditingController(text: widget.startText);
 
     _places = GoogleMapsPlaces(
         apiKey: widget.apiKey,
@@ -357,9 +379,7 @@ abstract class PlacesAutocompleteState extends State<PlacesAutocompleteWidget> {
 
     _queryTextController.addListener(_onQueryChange);
 
-    _queryBehavior.stream
-        .debounceTime(const Duration(milliseconds: 300))
-        .listen(doSearch);
+    _queryBehavior.stream.listen(doSearch);
   }
 
   Future<Null> doSearch(String value) async {
@@ -393,7 +413,10 @@ abstract class PlacesAutocompleteState extends State<PlacesAutocompleteWidget> {
   }
 
   void _onQueryChange() {
-    _queryBehavior.add(_queryTextController.text);
+    if (_debounce?.isActive ?? false) _debounce.cancel();
+    _debounce = Timer(Duration(milliseconds: widget.debounce), () {
+      _queryBehavior.add(_queryTextController.text);
+    });
   }
 
   @override
@@ -435,6 +458,7 @@ class PlacesAutocomplete {
       @required String apiKey,
       Mode mode = Mode.fullscreen,
       String hint = "Search",
+      BorderRadius overlayBorderRadius,
       num offset,
       Location location,
       num radius,
@@ -447,10 +471,12 @@ class PlacesAutocomplete {
       Widget logo,
       ValueChanged<PlacesAutocompleteResponse> onError,
       String proxyBaseUrl,
-      Client httpClient}) {
+      Client httpClient,
+      String startText=""}) {
     final builder = (BuildContext ctx) => PlacesAutocompleteWidget(
         apiKey: apiKey,
         mode: mode,
+        overlayBorderRadius: overlayBorderRadius,
         language: language,
         sessionToken: sessionToken,
         components: components,
@@ -464,7 +490,8 @@ class PlacesAutocomplete {
         logo: logo,
         onError: onError,
         proxyBaseUrl: proxyBaseUrl,
-        httpClient: httpClient);
+        httpClient: httpClient,
+        startText: startText,);
 
     if (mode == Mode.overlay) {
       return showDialog(context: context, builder: builder);
